@@ -2,11 +2,21 @@ var __PDF_DOC,
   __CURRENT_PAGE,
   __TOTAL_PAGES,
   __PAGE_RENDERING_IN_PROGRESS = 0,
-  __CANVAS = $('#pdf-canvas').get(0),
-  __CANVAS_CTX = __CANVAS.getContext('2d');
+  __PAGE_RENDERING_COUNT = 0;
+
+var __$CANVAS_CONTAINER = $('#pdf-canvas-container');
+var __CANVAS_CONTAINER = __$CANVAS_CONTAINER.get(0);
+
+var __PAGES = [];
+var __PAGE_RENDERS = [];
 
 var __SCALE = 0;
 var __ROTATE = 0;
+
+function cleanContainer() {
+  __$CANVAS_CONTAINER.empty();
+  __PAGE_RENDERS = [];
+}
 
 function showPDF(pdf_url) {
   $("#pdf-loader").show();
@@ -36,55 +46,72 @@ function showPage(page_no, scale, rotate) {
   __CURRENT_PAGE = page_no;
 
   // Disable Prev & Next buttons while page is being loaded
-  $("#pdf-next, #pdf-prev, #pdf-zoom-in, #pdf-zoom-out").attr('disabled', 'disabled');
+  $("#pdf-zoom-in, #pdf-zoom-out").attr('disabled', 'disabled');
 
   // While page is being rendered hide the canvas and show a loading message
-  $("#pdf-canvas").hide();
+  // $("#pdf-canvas").hide();
   $("#page-loader").show();
 
   // Update current page in HTML
   $("#pdf-current-page").text(page_no);
 
-  // Fetch the page
-  __PDF_DOC.getPage(page_no).then(function (page) {
-
-    __SCALE = scale;
-    if (!__SCALE) {
-      // As the canvas is of a fixed width we need to set the scale of the viewport accordingly
-      __SCALE = __CANVAS.width / page.getViewport(1).width;
+  if (__PAGE_RENDERING_COUNT === 0) {
+    for (var i = 1; i <= __PDF_DOC.numPages; i += 1) {
+      __PAGES.push(__PDF_DOC.getPage(i));
     }
+  }
 
-    __ROTATE = rotate;
-    if (!__ROTATE) {
-      // default no rotate
-      __ROTATE = 0;
+  Promise.all(__PAGES).then(function (pages) {
+    for (var i = 0; i < pages.length; i += 1) {
+      var page = pages[i];
+
+      // calc scale and rotate
+      __SCALE = scale;
+      if (!__SCALE) {
+        // As the canvas is of a fixed width we need to set the scale of the viewport accordingly
+        __SCALE = 750 / page.getViewport(1).width;
+      }
+
+      __ROTATE = rotate;
+      if (!__ROTATE) {
+        // default no rotate
+        __ROTATE = 0;
+      }
+
+      console.log('=== scale, rotate: ', __SCALE, __ROTATE, ' ===');
+
+      // Get viewport of the page at required scale
+      var viewport = page.getViewport(__SCALE, __ROTATE);
+
+      var canvas = document.createElement('canvas');
+      __CANVAS_CONTAINER.append(canvas);
+
+      // Set canvas height
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      console.log('=== width, height: ', canvas.height, canvas.width, ' ===');
+
+      var renderContext = {
+        canvasContext: canvas.getContext('2d'),
+        viewport: viewport
+      };
+
+      // Render the page contents in the canvas
+      __PAGE_RENDERS.push(page.render(renderContext));
     }
+  });
 
-    console.log('=== scale, rotate: ', __SCALE, __ROTATE, ' ===');
+  Promise.all(__PAGE_RENDERS).then(function () {
+    __PAGE_RENDERING_IN_PROGRESS = 0;
+    __PAGE_RENDERING_COUNT += 1;
 
-    // Get viewport of the page at required scale
-    var viewport = page.getViewport(__SCALE, __ROTATE);
+    // Re-enable Prev & Next buttons
+    $("#pdf-zoom-in, #pdf-zoom-out").removeAttr('disabled');
 
-    // Set canvas height
-    __CANVAS.height = viewport.height;
-    __CANVAS.width = viewport.width;
-
-    var renderContext = {
-      canvasContext: __CANVAS_CTX,
-      viewport: viewport
-    };
-
-    // Render the page contents in the canvas
-    page.render(renderContext).then(function () {
-      __PAGE_RENDERING_IN_PROGRESS = 0;
-
-      // Re-enable Prev & Next buttons
-      $("#pdf-next, #pdf-prev, #pdf-zoom-in, #pdf-zoom-out").removeAttr('disabled');
-
-      // Show the canvas and hide the page loader
-      $("#pdf-canvas").show();
-      $("#page-loader").hide();
-    });
+    // Show the canvas and hide the page loader
+    // $("#pdf-canvas").show();
+    $("#page-loader").hide();
   });
 }
 
@@ -110,25 +137,15 @@ $("#file-to-upload").on('change', function () {
   alert('Error : Not a PDF');
 });
 
-// Previous page of the PDF
-$("#pdf-prev").on('click', function () {
-  if (__CURRENT_PAGE != 1)
-    showPage(--__CURRENT_PAGE, __SCALE, __ROTATE);
-});
-
-// Next page of the PDF
-$("#pdf-next").on('click', function () {
-  if (__CURRENT_PAGE != __TOTAL_PAGES)
-    showPage(++__CURRENT_PAGE, __SCALE, __ROTATE);
-});
-
 $("#pdf-zoom-in").on('click', function () {
   var nextScale = __SCALE * 1.2;
+  cleanContainer();
   showPage(__CURRENT_PAGE, nextScale, __ROTATE);
 });
 
 $("#pdf-zoom-out").on('click', function () {
   var nextScale = __SCALE * 0.8;
+  cleanContainer();
   showPage(__CURRENT_PAGE, nextScale, __ROTATE);
 });
 
@@ -137,30 +154,30 @@ $('#pdf-rotate').on('click', function () {
   if (nextRotate === 360) {
     nextRotate = 0
   }
+  cleanContainer();
   showPage(__CURRENT_PAGE, __SCALE, nextRotate);
 });
 
 var clicked = false, clickX, clickY;
-var $canvasContainer = $('#pdf-canvas-container');
-$canvasContainer.on({
-  'mousemove': function(e) {
+__$CANVAS_CONTAINER.on({
+  'mousemove': function (e) {
     clicked && updateScrollPos(e);
   },
-  'mousedown': function(e) {
+  'mousedown': function (e) {
     clicked = true;
     clickX = e.pageX;
     clickY = e.pageY;
   },
-  'mouseup': function() {
+  'mouseup': function () {
     clicked = false;
     $('#pdf-canvas-container').css('cursor', 'auto');
   }
 });
 
-var updateScrollPos = function(e) {
-  $canvasContainer.css('cursor', 'move')
-    .scrollTop($canvasContainer.scrollTop() + (clickY - e.pageY))
-    .scrollLeft($canvasContainer.scrollLeft() + (clickX - e.pageX));
+var updateScrollPos = function (e) {
+  __$CANVAS_CONTAINER.css('cursor', 'move')
+    .scrollTop(__$CANVAS_CONTAINER.scrollTop() + (clickY - e.pageY))
+    .scrollLeft(__$CANVAS_CONTAINER.scrollLeft() + (clickX - e.pageX));
   clickX = e.pageX;
   clickY = e.pageY;
 }
