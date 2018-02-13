@@ -84,7 +84,7 @@ function showPage(page_no, scale, rotate) {
       var viewport = page.getViewport(__SCALE, __ROTATE);
 
       var canvas = document.createElement('canvas');
-      __CANVAS_CONTAINER.append(canvas);
+      __CANVAS_CONTAINER.appendChild(canvas);
 
       // Set canvas height
       canvas.height = viewport.height;
